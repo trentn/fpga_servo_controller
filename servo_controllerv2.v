@@ -32,7 +32,11 @@ module board_connections (
 
 endmodule
 
+//Main logic module
+//can group pins for loop by having a
+  //separate board connections module
 module servo_controller(
+
   input i_clock,
   input i_spi_clock,
   input i_mosi,
@@ -51,32 +55,35 @@ module servo_controller(
   reg [15:0] r_buffer;
   reg [15:0] r_period = 20000;
 
-  always @ (posedge i_clock) begin
-    //as long as the FPGA clock is faster than the SPI i_clock
-    //this should work
-    if(r_newByte != w_newByte) begin
-      r_newByte = w_newByte;
-      case (r_state)
-        0: r_index = r_spiByte;
-        1: r_buffer[15:8] = r_spiByte;
-        2: r_buffer[7:0] = r_spiByte;
-      endcase
-      r_state = r_state + 1;
-    end
-    if(r_state == 3) begin
-       r_pulse[r_index] = r_buffer;
-       r_state = r_state + 1;
+
+  //SPI logic
+  //implements CPOL = 1, CPHA = 0
+  //receive only
+  //having the code here instead of initial begin
+    //a separate module means synchronization issues
+    //can be avoided
+  reg [2:0] r_bit = 0;
+  reg [7:0] r_SPIbuffer = 0;
+  always @ (negedge i_spi_clock) begin
+    if(~i_select) begin
+      r_SPIbuffer[r_bit] = i_mosi;
+      if(r_bit == 7) begin
+        case (r_state)
+          0: r_index = r_SPIbuffer;
+          1: r_buffer[15:8] = r_SPIbuffer;
+          2: r_buffer[7:0] = r_SPIbuffer;
+        endcase
+        r_state = r_state + 1;
+        if(r_state == 3) begin
+           r_pulse[r_index] = r_buffer;
+           r_state = r_state + 1;
+        end
+      end
+  	  r_bit = r_bit + 1;
     end
   end
 
-  spi spi_instance(
-    .i_clock (i_spi_clock),
-    .i_dataIn (i_mosi),
-    .i_select (i_select),
-    .o_dataByte (r_spiByte),
-    .o_newByte (w_newByte)
-  );
-
+  //create a pwm generator for each servo being controlled
   generate
     genvar i;
       for(i=0;i<12;i=i+1) begin
@@ -91,6 +98,8 @@ module servo_controller(
 
 endmodule
 
+
+//PWM generator module
 module pwm_gen(
   input i_clock,
   input wire [15:0] i_pulse,
@@ -117,31 +126,4 @@ module pwm_gen(
     end
   end
 
-endmodule
-
-//implements CPOL = 1, CPHA = 0
-//receive only
-module spi(
-  input i_clock,
-  input i_dataIn,
-  input i_select,
-  output reg [7:0] o_dataByte = 0,
-  output reg o_newByte = 0
-);
-
-  reg [2:0] r_bit = 0;
-  reg [7:0] r_buffer = 0;
-
-  always @ (negedge i_clock) begin
-    if(~i_select) begin
-      r_buffer[r_bit] = i_dataIn;
-      if(r_bit == 7) begin
-        //copy to output buffer
-        o_dataByte = r_buffer;
-        //toggle when new byte received
-        o_newByte = !o_newByte;
-      end
-  	  r_bit = r_bit + 1;
-    end
-  end
 endmodule
