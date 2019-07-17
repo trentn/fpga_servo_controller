@@ -4,8 +4,18 @@ module board_connections (
   input PIN_15, //SPI MOSI
   input PIN_16, //SPI SS
   output USBPU,
-  output PIN_13,
-  output PIN_12
+  output PIN_2,
+  output PIN_3,
+  output PIN_4,
+  output PIN_5,
+  output PIN_6,
+  output PIN_7,
+  output PIN_8,
+  output PIN_9,
+  output PIN_10,
+  output PIN_11,
+  output PIN_12,
+  output PIN_13
 );
   assign USBPU = 0;
 
@@ -14,7 +24,10 @@ module board_connections (
     .i_spi_clock (PIN_14),
     .i_mosi (PIN_15),
     .i_select (PIN_16),
-    .o_pwm ({PIN_13, PIN_12})
+    .o_pwm ({PIN_2, PIN_3, PIN_4,
+             PIN_5, PIN_6, PIN_7,
+             PIN_8, PIN_9, PIN_10,
+             PIN_11, PIN_12, PIN_13})
   );
 
 endmodule
@@ -24,7 +37,7 @@ module servo_controller(
   input i_spi_clock,
   input i_mosi,
   input i_select,
-  output [0:1] o_pwm
+  output [0:11] o_pwm
 );
 
   wire [7:0] r_spiByte;
@@ -34,23 +47,25 @@ module servo_controller(
   reg r_newByte = 0;
 
   reg [7:0] r_index = 0;
-  reg [15:0] r_pulse[0:1];// = 1500;
+  reg [15:0] r_pulse[0:11];// = 1500;
+  reg [15:0] r_buffer;
   reg [15:0] r_period = 20000;
 
   always @ (posedge i_clock) begin
     //as long as the FPGA clock is faster than the SPI i_clock
     //this should work
     if(r_newByte != w_newByte) begin
+      r_newByte = w_newByte;
       case (r_state)
         0: r_index = r_spiByte;
-        1: r_pulse[r_index][15:8] = r_spiByte;
-        2: r_pulse[r_index][7:0] = r_spiByte;
+        1: r_buffer[15:8] = r_spiByte;
+        2: r_buffer[7:0] = r_spiByte;
       endcase
       r_state = r_state + 1;
-      if(r_state == 3) begin
-        r_state = 0;
-      end
-      r_newByte = w_newByte;
+    end
+    if(r_state == 3) begin
+       r_pulse[r_index] = r_buffer;
+       r_state = r_state + 1;
     end
   end
 
@@ -64,38 +79,37 @@ module servo_controller(
 
   generate
     genvar i;
-    for(i=0;i<2;i=i+1) begin
+      for(i=0;i<12;i=i+1) begin
       pwm_gen pwm(
         .i_clock (i_clock),
         .i_pulse (r_pulse[i]),
         .i_period (r_period),
         .o_pwm (o_pwm[i])
       );
-    end
+     end
   endgenerate
 
 endmodule
 
 module pwm_gen(
   input i_clock,
-  input [15:0] i_pulse,
-  input [15:0] i_period,
-  output reg o_pwm
+  input wire [15:0] i_pulse,
+  input wire [15:0] i_period,
+  output reg o_pwm = 1
 );
 
-  localparam clks_per_tick = 16; //16MHz/1000000 = 1us
-  reg [7:0] r_ticks;
-  reg [15:0] r_count;
+  reg [7:0] r_ticks = 0;
+  reg [15:0] r_count = 0;
 
   always @ (posedge i_clock) begin
     r_ticks = r_ticks+1;
 
-    if(r_ticks == clks_per_tick) begin
+    if(r_ticks > 15) begin
       r_count = r_count+1;
-      if(r_count == i_pulse) begin
+      if(r_count > i_pulse) begin
         o_pwm = 0;
       end
-      if(r_count == i_period) begin
+      if(r_count > i_period) begin
         o_pwm = 1;
         r_count = 0;
       end
@@ -121,15 +135,13 @@ module spi(
   always @ (negedge i_clock) begin
     if(~i_select) begin
       r_buffer[r_bit] = i_dataIn;
+      if(r_bit == 7) begin
+        //copy to output buffer
+        o_dataByte = r_buffer;
+        //toggle when new byte received
+        o_newByte = !o_newByte;
+      end
   	  r_bit = r_bit + 1;
     end
-    if(r_bit == 7) begin
-      //copy to output buffer
-      o_dataByte = r_buffer;
-
-      //toggle when new byte received
-      o_newByte = !o_newByte;
-    end
   end
-
 endmodule
